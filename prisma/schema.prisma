@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  COUNSELOR
+  VIEWER
+}
+
+enum LeadSource {
+  FACEBOOK
+  INSTAGRAM
+  GOOGLE_ADS
+  WEBSITE
+  WALK_IN
+  PHONE
+  REFERRAL
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  INTERESTED
+  VISIT_SCHEDULED
+  VISIT_DONE
+  FORM_FILLED
+  INTERACTION_DONE
+  ADMISSION_CONFIRMED
+  LOST
+}
+
+enum ActivityType {
+  NOTE
+  CALL
+  STATUS_CHANGE
+  ASSIGNMENT
+  FOLLOW_UP
+  SYSTEM
+}
+
+enum CallOutcome {
+  CONNECTED
+  NOT_ANSWERED
+  BUSY
+  SWITCHED_OFF
+  WRONG_NUMBER
+  CALL_BACK_LATER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  phone        String?
+  passwordHash String
+  role         Role      @default(COUNSELOR)
+  active       Boolean   @default(true)
+  // Takes part in automatic round-robin assignment
+  autoAssign   Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  assignedLeads Lead[]      @relation("AssignedLeads")
+  createdLeads  Lead[]      @relation("CreatedLeads")
+  activities    Activity[]
+  followUps     FollowUp[]
+  auditLogs     AuditLog[]
+}
+
+model Lead {
+  id             String     @id @default(cuid())
+  parentName     String
+  phone          String
+  altPhone       String?
+  email          String?
+  childName      String?
+  classApplying  String?
+  currentSchool  String?
+  area           String?
+  transportNeeded Boolean?
+  siblingInSchool Boolean   @default(false)
+  session        String?
+  notes          String?
+
+  source         LeadSource @default(OTHER)
+  status         LeadStatus @default(NEW)
+  lostReason     String?
+
+  // Marketing attribution
+  campaignName   String?
+  adsetName      String?
+  adName         String?
+  formName       String?
+  utmSource      String?
+  utmMedium      String?
+  utmCampaign    String?
+  gclid          String?
+  fbclid         String?
+  externalId     String?    @unique // Meta leadgen_id / Google lead_id
+  rawPayload     Json?
+
+  assignedToId   String?
+  assignedTo     User?      @relation("AssignedLeads", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdById    String?
+  createdBy      User?      @relation("CreatedLeads", fields: [createdById], references: [id], onDelete: SetNull)
+
+  callAttempts     Int       @default(0)
+  firstContactedAt DateTime?
+  lastContactedAt  DateTime?
+  nextFollowUpAt   DateTime?
+  convertedAt      DateTime?
+  duplicateCount   Int       @default(0)
+
+  deletedAt      DateTime?
+  deletedById    String?
+
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  activities       Activity[]
+  followUps        FollowUp[]
+  conversionEvents ConversionEvent[]
+
+  @@index([phone])
+  @@index([status])
+  @@index([source])
+  @@index([assignedToId])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model Activity {
+  id          String       @id @default(cuid())
+  leadId      String
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type        ActivityType
+  callOutcome CallOutcome?
+  content     String?
+  fromStatus  LeadStatus?
+  toStatus    LeadStatus?
+  createdAt   DateTime     @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model FollowUp {
+  id        String    @id @default(cuid())
+  leadId    String
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  dueAt     DateTime
+  note      String?
+  done      Boolean   @default(false)
+  doneAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, done, dueAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model CampaignSpend {
+  id           String     @id @default(cuid())
+  month        String     // YYYY-MM
+  platform     LeadSource
+  campaignName String     @default("")
+  amount       Float
+  createdAt    DateTime   @default(now())
+
+  @@unique([month, platform, campaignName])
+}
+
+model ConversionEvent {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  platform  String   // META
+  eventName String
+  status    String   // SENT | FAILED | SKIPPED
+  response  String?
+  createdAt DateTime @default(now())
+}
